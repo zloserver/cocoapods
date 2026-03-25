@@ -10,4 +10,5 @@ Pod::Spec.new do |s|
   s.source = { :http => 'https://github.com/zloserver/cocoapods/releases/download/v1.12.13/Libbox.xcframework.zip' }
 
   s.vendored_frameworks = 'Libbox.xcframework'
+  s.static_framework = true
 end

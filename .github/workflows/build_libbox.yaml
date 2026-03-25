@@ -63,10 +63,10 @@ jobs:
 
           rm -rf build
 
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          gomobile init
           git clone https://github.com/SagerNet/sing-box.git --depth 1 --branch "v${{ steps.vars.outputs.version }}" --single-branch build
           cd build
+          make lib_install
+          export PATH="$PATH:$(go env GOPATH)/bin"
           go run ./cmd/internal/build_libbox -target apple
 
       - name: Zip xcframework

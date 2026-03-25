@@ -1,0 +1,140 @@
+name: Build libbox cocoapod
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build, e.g. 1.13.3"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+
+    env:
+      POD_NAME: Libbox
+      XCFRAMEWORK_NAME: Libbox.xcframework
+      ARTIFACT_ZIP: Libbox.xcframework.zip
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set variables
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ inputs.version }}"
+          TAG="v${VERSION}"
+          RELEASE_NAME="${POD_NAME} ${VERSION}"
+          PODSPEC_FILE="Specs/${POD_NAME}/${VERSION}/${POD_NAME}.podspec"
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "podspec_file=${PODSPEC_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag does not already exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git rev-parse "${{ steps.vars.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ steps.vars.outputs.tag }} already exists"
+            exit 1
+          fi
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Build framework
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf build
+
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          gomobile init
+          git clone https://github.com/SagerNet/sing-box.git --depth 1 --branch "v${{ steps.vars.outputs.version }}" --single-branch build
+          cd build
+          go run ./cmd/internal/build_libbox -target apple
+
+      - name: Zip xcframework
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd build
+          /usr/bin/zip -r "${ARTIFACT_ZIP}" "${XCFRAMEWORK_NAME}"
+
+      - name: Generate podspec
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.vars.outputs.tag }}/${ARTIFACT_ZIP}"
+
+          mkdir -p "$(dirname "${{ steps.vars.outputs.podspec_file }}")"
+          cat > "${{ steps.vars.outputs.podspec_file }}" <<EOF
+          Pod::Spec.new do |s|
+            s.name = '${POD_NAME}'
+            s.version = '${{ steps.vars.outputs.version }}'
+            s.summary = 'CocoaPods wrapper for libbox (sing-box library)'
+            s.description = 'Binary CocoaPod packaging for ${POD_NAME}, version ${{ steps.vars.outputs.version }}.'
+            s.homepage = 'https://github.com/${{ github.repository }}'
+            s.license = { :type => 'GPL-3.0' }
+            s.author = { 'nekohasekai' => 'contact-sagernet@sekai.icu' }
+
+            s.source = { :http => '${RELEASE_URL}' }
+
+            s.vendored_frameworks = '${XCFRAMEWORK_NAME}'
+          end
+          EOF
+
+      - name: Commit podspec
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add "${{ steps.vars.outputs.podspec_file }}"
+          git commit -m "Release ${POD_NAME} ${{ steps.vars.outputs.version }}"
+
+      - name: Push podspec commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin main
+
+      - name: Create git tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git tag "${{ steps.vars.outputs.tag }}"
+
+      - name: Push git tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin "${{ steps.vars.outputs.tag }}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.vars.outputs.tag }}" \
+            "build/${ARTIFACT_ZIP}" \
+            --title "${{ steps.vars.outputs.release_name }}"

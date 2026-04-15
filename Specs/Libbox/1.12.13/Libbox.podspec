@@ -15,4 +15,5 @@ Pod::Spec.new do |s|
   s.libraries = [ "resolv.9" ]
 
   s.osx.deployment_target = '10.13'
+  s.ios.deployment_target = '15.0'
 end
